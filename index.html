@@ -308,7 +308,7 @@ const EQUIPMENT_TYPES = Object.keys(CAPACITY_OPTIONS);
 const PRIORITIES = ["สูง","กลาง","ต่ำ"];
 const PLAN_STATUSES = ["วางแผน","กำลังดำเนินการ","เสร็จสิ้น","เลื่อน"];
 const PM_STATUSES = ["เสร็จสิ้น","ระหว่างดำเนินการ","รอดำเนินการ"];
-const STORAGE_KEY = "mea_pm_clean_v999_master";
+const STORAGE_KEY = "mea_pm_clean_v1000_history";
 
 const MEA_HQ_COORDS = [13.5991, 100.5968];
 
@@ -376,7 +376,11 @@ function generate300Records(){
     const capacity = capList[i % capList.length];
     const tech = TECHNICIANS[i % TECHNICIANS.length];
     const loc = LOCATIONS_LIST[i % LOCATIONS_LIST.length];
-    const dayOffset = -Math.floor(i * 0.4);
+    
+    // กำหนดให้บางส่วนเป็นประวัติย้อนหลัง (เช่น i หาร 5 ลงตัว เป็นปี 2567-2568)
+    const isHistory = i % 5 === 0;
+    const historyYear = isHistory ? (i % 2 === 0 ? "2568" : "2567") : "";
+    const dayOffset = isHistory ? (-365 - (i % 400)) : -Math.floor(i * 0.4);
     
     const bench = benchmarks[eqType];
     const varianceFactor = 0.75 + (Math.sin(i) + 1) * 0.25;
@@ -403,7 +407,9 @@ function generate300Records(){
       otherCost: otherCost,
       maintenanceType: (i % 12 === 0) ? "แก้ไข" : "ป้องกัน",
       status: status,
-      notes: `ตรวจเช็คตามรอบบำรุงรักษาประจำปี วัดค่าความต้านทานฉนวนปกติ Health Index ${healthIndex}%`,
+      isHistorical: isHistory,
+      historicalYear: historyYear,
+      notes: isHistory ? `[ประวัติ Work Order ย้อนหลัง ปี ${historyYear}] ตรวจเช็คตามรอบบำรุงรักษาเดิม` : `ตรวจเช็คตามรอบบำรุงรักษาประจำปี Health Index ${healthIndex}%`,
       photo: ""
     });
   }
@@ -437,6 +443,7 @@ let STATE = null;
 let TAB = "dashboard";
 let CHARTS = {};
 let SEARCH_QUERY = "";
+let ENTRY_FILTER_MODE = "all"; // "all" | "current" | "history"
 let ROUTE_TEAM_FILTER = "ทั้งหมด";
 let IMPORT_TARGET = "pm";
 let EDITING_RECORD = null;
@@ -444,7 +451,7 @@ let LEAFLET_MAP = null;
 let ENTRY_MINI_MAP = null;
 let entryPhotoBase64 = "";
 
-const emptyPm = () => ({ date:new Date().toISOString().slice(0,10), equipmentType:EQUIPMENT_TYPES[0], capacity:CAPACITY_OPTIONS[EQUIPMENT_TYPES[0]][0], equipmentId:"", location:"", team:"", technician:"", laborHours:"", materialCost:"", laborCost:"", otherCost:"", maintenanceType:"ป้องกัน", status:"เสร็จสิ้น", notes:"", photo:"" });
+const emptyPm = () => ({ date:new Date().toISOString().slice(0,10), equipmentType:EQUIPMENT_TYPES[0], capacity:CAPACITY_OPTIONS[EQUIPMENT_TYPES[0]][0], equipmentId:"", location:"", team:"", technician:"", laborHours:"", materialCost:"", laborCost:"", otherCost:"", maintenanceType:"ป้องกัน", status:"เสร็จสิ้น", isHistorical:false, historicalYear:"2568", notes:"", photo:"" });
 const emptyPlan = () => ({ equipmentType:EQUIPMENT_TYPES[0], capacity:CAPACITY_OPTIONS[EQUIPMENT_TYPES[0]][0], equipmentId:"", location:"", plannedDate:new Date().toISOString().slice(0,10), team:"", priority:"กลาง", status:"วางแผน" });
 let pmForm = emptyPm();
 let planForm = emptyPlan();
@@ -552,13 +559,15 @@ function handleFileImport(e) {
             otherCost: Number(r[10]) || 0,
             maintenanceType: r[12] || "ป้องกัน",
             status: r[13] || "เสร็จสิ้น",
-            notes: r[14] || "นำเข้าจาก Excel",
+            isHistorical: true,
+            historicalYear: "2568",
+            notes: r[14] || "นำเข้าประวัติย้อนหลังผ่าน Excel",
             photo: ""
           });
         }
         if(imported.length){
           persist({ ...STATE, pmRecords: [...imported, ...STATE.pmRecords] });
-          alert(`นำเข้าสำเร็จ ${imported.length} รายการ`);
+          alert(`นำเข้าประวัติย้อนหลังสำเร็จ ${imported.length} รายการ`);
         }
       }
     } catch(err) { alert("เกิดข้อผิดพลาดในการอ่านไฟล์"); }
@@ -576,8 +585,8 @@ function showKpiDetail(type) {
 
   if (type === "total_pm") {
     const completed = pmRecords.filter(r => r.status === "เสร็จสิ้น").length;
+    const historyCount = pmRecords.filter(r => r.isHistorical).length;
     const ongoing = pmRecords.filter(r => r.status === "ระหว่างดำเนินการ" || r.status === "กำลังดำเนินการ").length;
-    const pending = pmRecords.filter(r => r.status === "รอดำเนินการ").length;
 
     title = `รายละเอียดงาน PM ทั้งหมด (${pmRecords.length} งาน)`;
     contentHtml = `
@@ -586,13 +595,13 @@ function showKpiDetail(type) {
           <div style="font-size:11px;color:var(--muted);">เสร็จสิ้นแล้ว</div>
           <div style="font-size:20px;font-weight:700;color:var(--green);font-family:'JetBrains Mono';">${completed}</div>
         </div>
+        <div class="card" style="padding:12px;text-align:center;border-left:3px solid var(--purple);">
+          <div style="font-size:11px;color:var(--muted);">ประวัติย้อนหลัง</div>
+          <div style="font-size:20px;font-weight:700;color:var(--purple);font-family:'JetBrains Mono';">${historyCount}</div>
+        </div>
         <div class="card" style="padding:12px;text-align:center;border-left:3px solid var(--electric);">
           <div style="font-size:11px;color:var(--muted);">ระหว่างดำเนินการ</div>
           <div style="font-size:20px;font-weight:700;color:var(--electric);font-family:'JetBrains Mono';">${ongoing}</div>
-        </div>
-        <div class="card" style="padding:12px;text-align:center;border-left:3px solid var(--amber);">
-          <div style="font-size:11px;color:var(--muted);">รอดำเนินการ</div>
-          <div style="font-size:20px;font-weight:700;color:var(--amber);font-family:'JetBrains Mono';">${pending}</div>
         </div>
       </div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">รายการงาน PM ล่าสุดในระบบ:</p>
@@ -670,23 +679,6 @@ function showKpiDetail(type) {
           <div style="font-size:20px;font-weight:700;color:var(--muted);font-family:'JetBrains Mono';">${low}</div>
         </div>
       </div>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">แผนงานที่ใกล้ถึงกำหนดเข้าตรวจ:</p>
-      <div class="desktop-table-wrap">
-        <table>
-          <thead><tr><th>วันที่</th><th>อุปกรณ์</th><th>รหัส</th><th>สายป้อน</th><th>ทีม</th></tr></thead>
-          <tbody>
-            ${planRecords.slice(0, 6).map(p => `
-              <tr>
-                <td>${thDate(p.plannedDate)}</td>
-                <td>${esc(p.equipmentType)}</td>
-                <td class="mono" style="color:var(--electric);font-weight:700;">${esc(p.equipmentId)}</td>
-                <td class="muted">${esc(p.location)}</td>
-                <td><span class="pill" style="background:var(--blue-soft);color:var(--navy);">${esc(p.team)}</span></td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
       <div style="text-align:right;margin-top:16px;">
         <button class="btn-primary" onclick="closeKpiModal(); TAB='plan'; render();">ไปยังหน้าตารางแผนงาน ➔</button>
       </div>
@@ -734,6 +726,10 @@ function getSortedInspectionPoints(){
 
 function recordsTable(records, {withDelete, compact} = {}){
   const filtered = (records || []).filter(r => {
+    // กรองโหมดประวัติย้อนหลังในหน้า Entry
+    if(ENTRY_FILTER_MODE === "history" && !r.isHistorical) return false;
+    if(ENTRY_FILTER_MODE === "current" && r.isHistorical) return false;
+
     if(!SEARCH_QUERY) return true;
     const q = SEARCH_QUERY.toLowerCase();
     return (r.equipmentId||"").toLowerCase().includes(q) ||
@@ -757,11 +753,14 @@ function recordsTable(records, {withDelete, compact} = {}){
           : `<span style="color:${C.red};font-size:11px;font-weight:700;">(+${baht(diff)})</span>`) : "";
 
         return `
-          <div class="m-record-card">
+          <div class="m-record-card" style="${r.isHistorical?'border-left:4px solid var(--purple);':''}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
               <div>
                 <div class="m-card-id">${esc(r.equipmentId)} <span class="capacity-pill">${esc(r.capacity||"-")}</span></div>
-                <div style="font-size:12px;color:var(--text);font-weight:600;margin-top:2px;">${esc(r.equipmentType)}</div>
+                <div style="font-size:12px;color:var(--text);font-weight:600;margin-top:2px;">
+                  ${esc(r.equipmentType)} 
+                  ${r.isHistorical ? `<span class="pill" style="background:var(--purple-soft);color:var(--purple);font-size:10px;margin-left:4px;">ประวัติย้อนหลัง ปี ${esc(r.historicalYear||'อดีต')}</span>` : ''}
+                </div>
                 <div style="font-size:12px;color:var(--muted);margin-top:2px;">${thDate(r.date)} • ${esc(r.team)} ${r.technician ? `• ${esc(r.technician)}` : ""}</div>
               </div>
               <div>${statusPill(r.status)}</div>
@@ -783,7 +782,7 @@ function recordsTable(records, {withDelete, compact} = {}){
     </div>
   `;
 
-  const headers = ["วันที่","อุปกรณ์","ขนาดพิกัด","รหัส","สายป้อน / พื้นที่","รูปถ่าย","ทีม","ผู้ปฏิบัติงาน","ต้นทุนรวม","WCM Diff","สถานะ",""];
+  const headers = ["วันที่/รอบปี","ประเภทงาน","อุปกรณ์","ขนาดพิกัด","รหัส","สายป้อน / พื้นที่","รูปถ่าย","ทีม","ผู้ปฏิบัติงาน","ต้นทุนรวม","WCM Diff","สถานะ",""];
   const desktopTableHtml = `
     <div class="desktop-table-wrap">
       <table>
@@ -797,8 +796,12 @@ function recordsTable(records, {withDelete, compact} = {}){
               ? `<span style="color:${C.green};font-size:11px;font-weight:700;">ประหยัด ${baht(Math.abs(diff))}</span>` 
               : `<span style="color:${C.red};font-size:11px;font-weight:700;">+${baht(diff)}</span>`) : "-";
 
-            return `<tr>
-              <td>${thDate(r.date)}</td>
+            return `<tr style="${r.isHistorical?'background:rgba(139, 92, 246, 0.03);':''}">
+              <td>
+                ${thDate(r.date)}
+                ${r.isHistorical ? `<br><span class="pill" style="background:var(--purple-soft);color:var(--purple);font-size:10px;margin-top:2px;">ย้อนหลัง ปี ${esc(r.historicalYear||'อดีต')}</span>` : ''}
+              </td>
+              <td>${r.isHistorical ? '<strong style="color:var(--purple);">ประวัติเดิม</strong>' : 'ปกติ'}</td>
               <td><strong>${esc(r.equipmentType)}</strong></td>
               <td><span class="capacity-pill">${esc(r.capacity||"-")}</span></td>
               <td class="mono" style="font-weight:700;color:var(--electric);">${esc(r.equipmentId)}</td>
@@ -840,10 +843,24 @@ function renderModal(){
       <div class="modal-backdrop" id="modal-backdrop">
         <div class="modal-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:12px;">
-            <h3 style="font-size:17px;font-weight:800;color:var(--navy);margin:0;">แก้ไขงาน PM (${esc(data.equipmentId)})</h3>
+            <h3 style="font-size:17px;font-weight:800;color:var(--navy);margin:0;">แก้ไขงาน PM / Work Order (${esc(data.equipmentId)})</h3>
             <button class="btn-sm" id="modal-close-btn">×</button>
           </div>
           <form id="edit-pm-form" class="entry-form" style="padding:0;border:none;box-shadow:none;margin-bottom:0;">
+            ${field("ประเภทบันทึกข้อมูล", `
+              <select id="m-isHistorical">
+                <option value="false" ${!data.isHistorical?"selected":""}>งานปฏิบัติการปัจจุบัน (Current PM)</option>
+                <option value="true" ${data.isHistorical?"selected":""}>ประวัติ Work Order ย้อนหลัง (Historical Data)</option>
+              </select>
+            `)}
+            ${field("ปีงบประมาณย้อนหลัง (ถ้ามี)", `
+              <select id="m-historicalYear">
+                <option value="2568" ${data.historicalYear==="2568"?"selected":""}>ปีงบประมาณ 2568</option>
+                <option value="2567" ${data.historicalYear==="2567"?"selected":""}>ปีงบประมาณ 2567</option>
+                <option value="2566" ${data.historicalYear==="2566"?"selected":""}>ปีงบประมาณ 2566</option>
+                <option value="2565" ${data.historicalYear==="2565"?"selected":""}>ปีงบประมาณ 2565 หรือก่อนหน้า</option>
+              </select>
+            `)}
             ${field("วันที่ปฏิบัติงาน", `<input type="date" required id="m-date" value="${esc(data.date)}"/>`)}
             ${field("ประเภทอุปกรณ์", `<select id="m-equipmentType">${EQUIPMENT_TYPES.map(t=>`<option ${data.equipmentType===t?"selected":""}>${t}</option>`).join("")}</select>`)}
             ${field("ขนาดและพิกัดกำลัง", `<select id="m-capacity">${capList.map(c=>`<option ${data.capacity===c?"selected":""}>${c}</option>`).join("")}</select>`)}
@@ -874,7 +891,7 @@ function renderModal(){
               </div>
             </div>
 
-            <div class="span-all">${field("บันทึกการทำงาน / ข้อสังเกต / Health Index", `<textarea rows="3" id="m-notes">${esc(data.notes||"")}</textarea>`)}</div>
+            <div class="span-all">${field("บันทึกการทำงาน / ข้อสังเกต", `<textarea rows="3" id="m-notes">${esc(data.notes||"")}</textarea>`)}</div>
             <div class="form-actions" style="margin-top:14px;">
               <button type="button" class="btn-secondary" id="modal-cancel-btn">ยกเลิก</button>
               <button type="submit" class="btn-primary">${ICONS.check("#fff")} บันทึกการเปลี่ยนแปลง</button>
@@ -955,6 +972,8 @@ function attachModalListeners(){
       const val = id => document.getElementById(id).value;
       const updated = {
         ...EDITING_RECORD.data,
+        isHistorical: val("m-isHistorical") === "true",
+        historicalYear: val("m-historicalYear"),
         date: val("m-date"), equipmentType: val("m-equipmentType"), capacity: val("m-capacity"),
         equipmentId: val("m-equipmentId"), location: val("m-location"), team: val("m-team"), technician: val("m-technician"),
         laborHours: Number(val("m-laborHours"))||0, materialCost: Number(val("m-materialCost"))||0,
@@ -1057,19 +1076,19 @@ function renderDashboard(){
   const {pmRecords, planRecords} = STATE;
   const totalCost = pmRecords.reduce((s,r)=>s+Number(r.materialCost)+Number(r.laborCost)+Number(r.otherCost),0);
   const completed = pmRecords.filter(r=>r.status==="เสร็จสิ้น").length;
+  const historyCount = pmRecords.filter(r=>r.isHistorical).length;
   const avgCost = pmRecords.length ? totalCost/pmRecords.length : 0;
-  const upcoming = planRecords.filter(p=>p.status!=="เสร็จสิ้น").length;
 
   return `
-    ${sectionHeader("Dashboard ภาพรวม (Big Data CMMS)", `กำลังแสดงผลข้อมูลประวัติงาน PM จำนวน ${pmRecords.length} รายการ และแผนงาน ${planRecords.length} รายการ`, `
+    ${sectionHeader("Dashboard ภาพรวม (Big Data CMMS)", `กำลังแสดงผลข้อมูลประวัติงาน PM จำนวน ${pmRecords.length} รายการ (ประวัติย้อนหลัง ${historyCount} รายการ)`, `
       <button class="btn-secondary" id="print-pdf-btn">${ICONS.filePdf} พิมพ์สรุป (PDF)</button>
       <button class="btn-success" id="export-dashboard-excel-btn">${ICONS.fileExcel} ส่งออก Excel</button>
     `)}
     <div class="kpi-grid">
-      ${kpiCard("clipboard","งาน PM ในฐานข้อมูล",pmRecords.length,`ปิดงานแล้ว ${completed} งาน`,"electric", "showKpiDetail('total_pm')")}
+      ${kpiCard("clipboard","งาน PM ทั้งหมด",pmRecords.length,`ประวัติย้อนหลัง ${historyCount} งาน`,"electric", "showKpiDetail('total_pm')")}
       ${kpiCard("gauge","Health Index เฉลี่ย", "93.8%", "ประเมินสุขภาพอุปกรณ์รวม 5 กลุ่ม", "green", "showKpiDetail('health_index')")}
       ${kpiCard("coins","ต้นทุนจริงรวม",baht(totalCost),`เฉลี่ย ${baht(avgCost)}/งาน`,"amber", "showKpiDetail('total_cost')")}
-      ${kpiCard("calendar","แผนงานค้าง",upcoming,"รอ / กำลังดำเนินการ","red", "showKpiDetail('upcoming_plans')")}
+      ${kpiCard("calendar","แผนงานค้าง",planRecords.filter(p=>p.status!=="เสร็จสิ้น").length,"รอ / กำลังดำเนินการ","red", "showKpiDetail('upcoming_plans')")}
     </div>
     <div class="chart-grid">
       <div class="card chart-card">
@@ -1082,7 +1101,7 @@ function renderDashboard(){
       </div>
     </div>
     <div class="card chart-card">
-      <h3>รายการ PM ล่าสุด (จากทั้งหมด ${pmRecords.length} รายการ)</h3>
+      <h3>รายการ PM และประวัติย้อนหลังล่าสุด</h3>
       ${recordsTable(pmRecords.slice(0,8), {compact:true})}
     </div>
   `;
@@ -1345,12 +1364,26 @@ function renderEntry(){
   const currentBench = STATE.benchmarks[f.equipmentType] || 8500;
 
   return `
-    ${sectionHeader("บันทึกข้อมูลงาน PM (Smart Entry)", `จัดการและบันทึกประวัติงาน PM (ปัจจุบันมี ${STATE.pmRecords.length} รายการ)`, `
+    ${sectionHeader("บันทึกข้อมูลงาน PM & ประวัติ Work Order ย้อนหลัง", `จัดการและบันทึกประวัติงาน PM (ปัจจุบันมี ${STATE.pmRecords.length} รายการ)`, `
       <button class="btn-secondary" id="go-guide-btn">${ICONS.book(C.blue)} คู่มือเกณฑ์กรอก</button>
-      <button class="btn-secondary" id="import-pm-btn">${ICONS.upload} นำเข้า Excel</button>
+      <button class="btn-secondary" id="import-pm-btn">${ICONS.upload} นำเข้า Excel ย้อนหลัง</button>
       <button class="btn-success" id="export-pm-excel-btn">${ICONS.fileExcel} ส่งออก Excel ทั้งหมด</button>
     `)}
     <form class="entry-form" id="pm-form">
+      ${field("ประเภทบันทึกข้อมูล", `
+        <select id="f-isHistorical">
+          <option value="false" ${!f.isHistorical?"selected":""}>งานปฏิบัติการปกติ (Current PM)</option>
+          <option value="true" ${f.isHistorical?"selected":""}>⚡ เพิ่มประวัติ Work Order ย้อนหลัง (Historical Data)</option>
+        </select>
+      `)}
+      ${field("ปีงบประมาณย้อนหลัง (ถ้ามี)", `
+        <select id="f-historicalYear">
+          <option value="2568" ${f.historicalYear==="2568"?"selected":""}>ปีงบประมาณ 2568</option>
+          <option value="2567" ${f.historicalYear==="2567"?"selected":""}>ปีงบประมาณ 2567</option>
+          <option value="2566" ${f.historicalYear==="2566"?"selected":""}>ปีงบประมาณ 2566</option>
+          <option value="2565" ${f.historicalYear==="2565"?"selected":""}>ปีงบประมาณ 2565 หรือก่อนหน้า</option>
+        </select>
+      `)}
       ${field("วันที่ปฏิบัติงาน", `<input type="date" required id="f-date" value="${esc(f.date)}"/>`)}
       ${field("ประเภทอุปกรณ์", `<select id="f-equipmentType">${EQUIPMENT_TYPES.map(t=>`<option ${f.equipmentType===t?"selected":""}>${t}</option>`).join("")}</select>`)}
       ${field("ขนาดและพิกัดกำลัง (Rating)", `<select id="f-capacity">${capList.map(c=>`<option ${f.capacity===c?"selected":""}>${c}</option>`).join("")}</select>`)}
@@ -1439,11 +1472,19 @@ function renderEntry(){
       </div>
 
       <div class="span-all">${field("บันทึกการทำงาน / ข้อสังเกต", `<textarea rows="2" id="f-notes" placeholder="ระบุสิ่งที่พบ ค่าความเป็นฉนวน">${esc(f.notes)}</textarea>`)}</div>
-      <div class="form-actions"><button type="submit" class="btn-primary">${ICONS.plus} บันทึกงาน PM</button></div>
+      <div class="form-actions"><button type="submit" class="btn-primary">${ICONS.plus} บันทึกข้อมูลเข้าสู่ระบบ</button></div>
     </form>
+
     <div class="card chart-card">
-      <div class="toolbar"><input type="text" id="search-input" placeholder="🔍 ค้นหาในฐานข้อมูล 300+ รายการ (รหัส, ขนาด, ทีม, ช่าง, สายป้อน)..." value="${esc(SEARCH_QUERY)}"/></div>
-      <h3>ประวัติงาน PM ทั้งหมด (${STATE.pmRecords.length} รายการ)</h3>
+      <div class="toolbar" style="justify-content:space-between;align-items:center;">
+        <input type="text" id="search-input" placeholder="🔍 ค้นหาในฐานข้อมูล (รหัส, ขนาด, ทีม, ช่าง, สายป้อน)..." value="${esc(SEARCH_QUERY)}" style="flex:2;"/>
+        <select id="entry-filter-mode" style="flex:1;">
+          <option value="all" ${ENTRY_FILTER_MODE==="all"?"selected":""}>แสดงทั้งหมด (${STATE.pmRecords.length})</option>
+          <option value="current" ${ENTRY_FILTER_MODE==="current"?"selected":""}>เฉพาะงานปัจจุบัน</option>
+          <option value="history" ${ENTRY_FILTER_MODE==="history"?"selected":""}>เฉพาะประวัติ Work Order ย้อนหลัง</option>
+        </select>
+      </div>
+      <h3>รายการประวัติงาน PM ทั้งหมด</h3>
       ${recordsTable(STATE.pmRecords, {withDelete:true})}
     </div>
   `;
@@ -1798,6 +1839,8 @@ function attachTabListeners(){
         const lCost = Number(document.getElementById("f-laborCost").value)||0;
         const oCost = Number(document.getElementById("f-otherCost").value)||0;
         const hiScore = document.getElementById("hi-live-score") ? document.getElementById("hi-live-score").innerText : "94%";
+        const isHist = document.getElementById("f-isHistorical").value === "true";
+        const histYear = document.getElementById("f-historicalYear").value;
 
         const record = {
           date: document.getElementById("f-date").value,
@@ -1813,7 +1856,9 @@ function attachTabListeners(){
           otherCost: oCost,
           maintenanceType: document.getElementById("f-maintenanceType").value,
           status: document.getElementById("f-status").value,
-          notes: (document.getElementById("f-notes").value || "") + ` [Health Index: ${hiScore}]`,
+          isHistorical: isHist,
+          historicalYear: histYear,
+          notes: (document.getElementById("f-notes").value || "") + (isHist ? ` [ประวัติย้อนหลัง ปี ${histYear}]` : ` [Health Index: ${hiScore}]`),
           photo: entryPhotoBase64,
           id: uid()
         };
@@ -1827,17 +1872,23 @@ function attachTabListeners(){
     const searchInput = document.getElementById("search-input");
     if(searchInput) searchInput.oninput = (e)=>{ SEARCH_QUERY = e.target.value; render(); };
 
+    const filterModeSelect = document.getElementById("entry-filter-mode");
+    if(filterModeSelect) filterModeSelect.onchange = (e)=>{ ENTRY_FILTER_MODE = e.target.value; render(); };
+
+    const importPmBtn = document.getElementById("import-pm-btn");
+    if(importPmBtn) importPmBtn.onclick = () => triggerExcelImport("pm");
+
     const exportExcelBtn = document.getElementById("export-pm-excel-btn");
     if(exportExcelBtn){
       exportExcelBtn.onclick = ()=>{
-        const headers = ["วันที่", "ประเภทอุปกรณ์", "ขนาดพิกัด", "รหัสอุปกรณ์", "พื้นที่/สายป้อน", "ทีม", "ช่างผู้รับผิดชอบ", "ชม.แรงงาน", "ค่าพัสดุ", "ค่าแรง", "ค่าใช้จ่ายอื่น", "รวมต้นทุน", "ประเภทงาน", "สถานะ", "หมายเหตุ"];
+        const headers = ["วันที่", "ประเภทบันทึก", "ปีงบย้อนหลัง", "ประเภทอุปกรณ์", "ขนาดพิกัด", "รหัสอุปกรณ์", "พื้นที่/สายป้อน", "ทีม", "ช่างผู้รับผิดชอบ", "ชม.แรงงาน", "ค่าพัสดุ", "ค่าแรง", "ค่าใช้จ่ายอื่น", "รวมต้นทุน", "ประเภทงาน", "สถานะ", "หมายเหตุ"];
         const rows = STATE.pmRecords.map(r => [
-          r.date, r.equipmentType, r.capacity||"-", r.equipmentId, r.location, r.team, r.technician,
+          r.date, r.isHistorical ? "ประวัติย้อนหลัง" : "งานปัจจุบัน", r.isHistorical ? r.historicalYear : "-", r.equipmentType, r.capacity||"-", r.equipmentId, r.location, r.team, r.technician,
           r.laborHours, r.materialCost, r.laborCost, r.otherCost,
           (Number(r.materialCost)+Number(r.laborCost)+Number(r.otherCost)),
           r.maintenanceType, r.status, r.notes
         ]);
-        exportToExcel("MEA_PM_Records_300_" + new Date().toISOString().slice(0,10), "PM_Records", [headers, ...rows]);
+        exportToExcel("MEA_PM_Records_History_" + new Date().toISOString().slice(0,10), "PM_Records", [headers, ...rows]);
       };
     }
 
@@ -1945,7 +1996,7 @@ function attachTabListeners(){
       const totalCost = STATE.pmRecords.reduce((s,r)=>s+Number(r.materialCost)+Number(r.laborCost)+Number(r.otherCost),0);
       const rows = [
         ["จำนวนงาน PM ทั้งหมด", STATE.pmRecords.length],
-        ["งานที่เสร็จสิ้น", STATE.pmRecords.filter(r=>r.status==="เสร็จสิ้น").length],
+        ["ประวัติ Work Order ย้อนหลัง", STATE.pmRecords.filter(r=>r.isHistorical).length],
         ["Health Index เฉลี่ย", "93.8%"],
         ["ต้นทุนจริงรวม (บาท)", totalCost],
         ["แผนงานค้าง", STATE.planRecords.length]
