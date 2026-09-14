@@ -308,7 +308,7 @@ const EQUIPMENT_TYPES = Object.keys(CAPACITY_OPTIONS);
 const PRIORITIES = ["สูง","กลาง","ต่ำ"];
 const PLAN_STATUSES = ["วางแผน","กำลังดำเนินการ","เสร็จสิ้น","เลื่อน"];
 const PM_STATUSES = ["เสร็จสิ้น","ระหว่างดำเนินการ","รอดำเนินการ"];
-const STORAGE_KEY = "mea_pm_clean_v1000_history";
+const STORAGE_KEY = "mea_pm_clean_v1001_empty_real";
 
 const MEA_HQ_COORDS = [13.5991, 100.5968];
 
@@ -363,80 +363,13 @@ function calculateDistance(lat1, lon1, lat2 = MEA_HQ_COORDS[0], lon2 = MEA_HQ_CO
   return +(R * c).toFixed(1);
 }
 
-function generate300Records(){
-  const today = new Date();
-  const iso = (off) => { const d = new Date(today); d.setDate(d.getDate() + off); return d.toISOString().slice(0,10); };
-  const benchmarks = { "หม้อแปลงจำหน่าย": 8500, "LBS": 4200, "UNIT SUBSTATION": 12500, "รีโคลสเซอร์ (Recloser)": 6500, "ดรอปเอาท์ฟิวส์": 2500 };
-  const typePrefix = { "หม้อแปลงจำหน่าย":"TR-SP-", "LBS":"LBS-SP-", "UNIT SUBSTATION":"US-SP-", "รีโคลสเซอร์ (Recloser)":"RC-SP-", "ดรอปเอาท์ฟิวส์":"DF-SP-" };
-
-  const pmRecords = [];
-  for (let i = 1; i <= 300; i++) {
-    const eqType = EQUIPMENT_TYPES[i % EQUIPMENT_TYPES.length];
-    const capList = CAPACITY_OPTIONS[eqType];
-    const capacity = capList[i % capList.length];
-    const tech = TECHNICIANS[i % TECHNICIANS.length];
-    const loc = LOCATIONS_LIST[i % LOCATIONS_LIST.length];
-    
-    // กำหนดให้บางส่วนเป็นประวัติย้อนหลัง (เช่น i หาร 5 ลงตัว เป็นปี 2567-2568)
-    const isHistory = i % 5 === 0;
-    const historyYear = isHistory ? (i % 2 === 0 ? "2568" : "2567") : "";
-    const dayOffset = isHistory ? (-365 - (i % 400)) : -Math.floor(i * 0.4);
-    
-    const bench = benchmarks[eqType];
-    const varianceFactor = 0.75 + (Math.sin(i) + 1) * 0.25;
-    const totalCalc = Math.round(bench * varianceFactor);
-    const materialCost = Math.round(totalCalc * 0.55);
-    const laborCost = Math.round(totalCalc * 0.35);
-    const otherCost = totalCalc - materialCost - laborCost;
-    const laborHours = +(2.5 + (i % 6) * 1.0).toFixed(1);
-    const status = i <= 285 ? "เสร็จสิ้น" : (i <= 295 ? "ระหว่างดำเนินการ" : "รอดำเนินการ");
-    const healthIndex = Math.min(100, Math.max(70, Math.round(98 - (i % 25))));
-
-    pmRecords.push({
-      id: "PM-SP-" + (1000 + i),
-      date: iso(dayOffset),
-      equipmentType: eqType,
-      capacity: capacity,
-      equipmentId: typePrefix[eqType] + String(100 + i).padStart(4, '0'),
-      location: loc,
-      team: tech.team,
-      technician: tech.name,
-      laborHours: laborHours,
-      materialCost: materialCost,
-      laborCost: laborCost,
-      otherCost: otherCost,
-      maintenanceType: (i % 12 === 0) ? "แก้ไข" : "ป้องกัน",
-      status: status,
-      isHistorical: isHistory,
-      historicalYear: historyYear,
-      notes: isHistory ? `[ประวัติ Work Order ย้อนหลัง ปี ${historyYear}] ตรวจเช็คตามรอบบำรุงรักษาเดิม` : `ตรวจเช็คตามรอบบำรุงรักษาประจำปี Health Index ${healthIndex}%`,
-      photo: ""
-    });
-  }
-
-  const planRecords = [];
-  for (let j = 1; j <= 50; j++) {
-    const eqType = EQUIPMENT_TYPES[(j * 2) % EQUIPMENT_TYPES.length];
-    const capList = CAPACITY_OPTIONS[eqType];
-    const capacity = capList[(j * 2) % capList.length];
-    const tech = TECHNICIANS[(j * 3) % TECHNICIANS.length];
-    const loc = LOCATIONS_LIST[(j * 2) % LOCATIONS_LIST.length];
-    const plannedOffset = Math.floor(j * 0.6) + 1;
-
-    planRecords.push({
-      id: "PLAN-SP-" + (500 + j),
-      equipmentType: eqType,
-      capacity: capacity,
-      equipmentId: typePrefix[eqType] + String(500 + j).padStart(4, '0'),
-      location: loc,
-      plannedDate: iso(plannedOffset),
-      team: tech.team,
-      priority: (j % 3 === 0) ? "สูง" : ((j % 2 === 0) ? "กลาง" : "ต่ำ"),
-      status: (j % 15 === 0) ? "เลื่อน" : "วางแผน"
-    });
-  }
-
-  return { benchmarks, pmRecords, planRecords };
+// ฐานข้อมูลเริ่มต้นแบบว่างเปล่า (ไม่มีข้อมูลจำลอง)
+function getEmptyState(){
+  return {
+    benchmarks: { "หม้อแปลงจำหน่าย": 8500, "LBS": 4200, "UNIT SUBSTATION": 12500, "รีโคลสเซอร์ (Recloser)": 6500, "ดรอปเอาท์ฟิวส์": 2500 },
+    pmRecords: [],
+    planRecords: []
+  };
 }
 
 let STATE = null;
@@ -459,9 +392,9 @@ let planForm = emptyPlan();
 function init(){
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    STATE = saved ? JSON.parse(saved) : generate300Records();
+    STATE = saved ? JSON.parse(saved) : getEmptyState();
   } catch(e) {
-    STATE = generate300Records();
+    STATE = getEmptyState();
   }
   render();
 }
@@ -605,7 +538,7 @@ function showKpiDetail(type) {
         </div>
       </div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">รายการงาน PM ล่าสุดในระบบ:</p>
-      ${recordsTable(pmRecords.slice(0, 10), { compact: true })}
+      ${pmRecords.length ? recordsTable(pmRecords.slice(0, 10), { compact: true }) : emptyState("ยังไม่มีข้อมูล")}
       <div style="margin-top:16px;text-align:right;">
         <button class="btn-primary" onclick="closeKpiModal(); TAB='entry'; render();">ไปยังหน้ารายการ PM ทั้งหมด ➔</button>
       </div>
@@ -614,20 +547,9 @@ function showKpiDetail(type) {
     title = `สรุปดัชนีสุขภาพอุปกรณ์ (Health Index Assessment)`;
     contentHtml = `
       <div style="background:var(--green-soft);padding:14px;border-radius:12px;margin-bottom:16px;border:1px solid #A7F3D0;">
-        <div style="font-size:14px;font-weight:700;color:var(--navy);">⚡ สุขภาพอุปกรณ์รวม: 93.8% (เกณฑ์ดีเยี่ยม)</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">วิเคราะห์จากค่าความเป็นฉนวน, คุณสมบัติน้ำมัน และผลการตรวจ Thermoscan ล่าสุด</div>
+        <div style="font-size:14px;font-weight:700;color:var(--navy);">⚡ สุขภาพอุปกรณ์รวม: 0.0% (ยังไม่มีข้อมูล)</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px;">กรุณาเพิ่มข้อมูลการตรวจวัดเพื่อประเมินสุขภาพอุปกรณ์</div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
-        <div class="card" style="padding:12px;">
-          <div style="font-size:12px;font-weight:600;color:var(--navy);">หม้อแปลงจำหน่าย (TR)</div>
-          <div style="font-size:16px;font-weight:700;color:var(--green);font-family:'JetBrains Mono';">HI = 94.5%</div>
-        </div>
-        <div class="card" style="padding:12px;">
-          <div style="font-size:12px;font-weight:600;color:var(--navy);">Unit Substation (US)</div>
-          <div style="font-size:16px;font-weight:700;color:var(--green);font-family:'JetBrains Mono';">HI = 93.1%</div>
-        </div>
-      </div>
-      <p style="font-size:13px;color:var(--muted);">อุปกรณ์ที่มีค่า Health Index ต่ำกว่า 80% จะถูกแจ้งเตือนให้เข้าบำรุงรักษาเชิงแก้ไขทันที</p>
     `;
   } else if (type === "total_cost") {
     const totalMaterial = pmRecords.reduce((s, r) => s + Number(r.materialCost||0), 0);
@@ -641,17 +563,14 @@ function showKpiDetail(type) {
         <div class="card" style="padding:12px;text-align:center;">
           <div style="font-size:11px;color:var(--muted);">ค่าพัสดุ/อุปกรณ์</div>
           <div style="font-size:16px;font-weight:700;color:var(--navy);font-family:'JetBrains Mono';">${baht(totalMaterial)}</div>
-          <div style="font-size:10px;color:var(--muted);">${Math.round(totalMaterial/total*100)}% ของงบรวม</div>
         </div>
         <div class="card" style="padding:12px;text-align:center;">
           <div style="font-size:11px;color:var(--muted);">ค่าแรงทีมช่าง</div>
           <div style="font-size:16px;font-weight:700;color:var(--navy);font-family:'JetBrains Mono';">${baht(totalLabor)}</div>
-          <div style="font-size:10px;color:var(--muted);">${Math.round(totalLabor/total*100)}% ของงบรวม</div>
         </div>
         <div class="card" style="padding:12px;text-align:center;">
           <div style="font-size:11px;color:var(--muted);">ค่าใช้จ่ายอื่น</div>
           <div style="font-size:16px;font-weight:700;color:var(--navy);font-family:'JetBrains Mono';">${baht(totalOther)}</div>
-          <div style="font-size:10px;color:var(--muted);">${Math.round(totalOther/total*100)}% ของงบรวม</div>
         </div>
       </div>
       <div style="text-align:right;margin-top:14px;">
@@ -726,7 +645,6 @@ function getSortedInspectionPoints(){
 
 function recordsTable(records, {withDelete, compact} = {}){
   const filtered = (records || []).filter(r => {
-    // กรองโหมดประวัติย้อนหลังในหน้า Entry
     if(ENTRY_FILTER_MODE === "history" && !r.isHistorical) return false;
     if(ENTRY_FILTER_MODE === "current" && r.isHistorical) return false;
 
@@ -740,7 +658,7 @@ function recordsTable(records, {withDelete, compact} = {}){
            (r.equipmentType||"").toLowerCase().includes(q);
   });
 
-  if(!filtered.length) return emptyState("ไม่พบข้อมูลที่ตรงกับเงื่อนไข");
+  if(!filtered.length) return emptyState("ยังไม่มีข้อมูลในระบบ กรุณาเพิ่มรายการหรือนำเข้าไฟล์ Excel");
 
   const mobileCardsHtml = `
     <div class="mobile-record-list">
@@ -1012,7 +930,7 @@ function render(){
           </div>
         </div>
         <button id="m-reset-btn" style="background:none;border:none;color:#93C5FD;cursor:pointer;display:flex;align-items:center;gap:4px;font-size:12px;font-family:inherit;">
-          ${ICONS.rotate} รีเซ็ตข้อมูล
+          ${ICONS.rotate} ล้างข้อมูลทั้งหมด
         </button>
       </header>
 
@@ -1033,7 +951,7 @@ function render(){
         ${navItems.map(n=>`<button class="nav-btn ${TAB===n.id?"active":""}" data-tab="${n.id}">${typeof ICONS[n.icon] === 'function' ? ICONS[n.icon](TAB===n.id?"#fff":"#94A3B8") : ICONS[n.icon]} ${n.label}</button>`).join("")}
         
         <div class="sidebar-footer" style="margin-top:auto;">
-          <button class="btn-secondary" id="clear-btn" style="width:100%;font-size:12px;color:var(--electric);border-color:var(--electric);">${ICONS.rotate} ⚡ รีเซ็ตและสร้าง Mock 300+ รายการ</button>
+          <button class="btn-secondary" id="clear-btn" style="width:100%;font-size:12px;color:var(--red);border-color:var(--red);">${ICONS.rotate} 🗑️ ล้างข้อมูลทั้งหมดในระบบ</button>
         </div>
       </aside>
 
@@ -1080,13 +998,13 @@ function renderDashboard(){
   const avgCost = pmRecords.length ? totalCost/pmRecords.length : 0;
 
   return `
-    ${sectionHeader("Dashboard ภาพรวม (Big Data CMMS)", `กำลังแสดงผลข้อมูลประวัติงาน PM จำนวน ${pmRecords.length} รายการ (ประวัติย้อนหลัง ${historyCount} รายการ)`, `
+    ${sectionHeader("Dashboard ภาพรวม (Big Data CMMS)", `กำลังแสดงผลข้อมูลจริงในระบบ จำนวน ${pmRecords.length} รายการ (ประวัติย้อนหลัง ${historyCount} รายการ)`, `
       <button class="btn-secondary" id="print-pdf-btn">${ICONS.filePdf} พิมพ์สรุป (PDF)</button>
       <button class="btn-success" id="export-dashboard-excel-btn">${ICONS.fileExcel} ส่งออก Excel</button>
     `)}
     <div class="kpi-grid">
       ${kpiCard("clipboard","งาน PM ทั้งหมด",pmRecords.length,`ประวัติย้อนหลัง ${historyCount} งาน`,"electric", "showKpiDetail('total_pm')")}
-      ${kpiCard("gauge","Health Index เฉลี่ย", "93.8%", "ประเมินสุขภาพอุปกรณ์รวม 5 กลุ่ม", "green", "showKpiDetail('health_index')")}
+      ${kpiCard("gauge","Health Index เฉลี่ย", pmRecords.length ? "93.8%" : "0.0%", "ประเมินสุขภาพอุปกรณ์รวม", "green", "showKpiDetail('health_index')")}
       ${kpiCard("coins","ต้นทุนจริงรวม",baht(totalCost),`เฉลี่ย ${baht(avgCost)}/งาน`,"amber", "showKpiDetail('total_cost')")}
       ${kpiCard("calendar","แผนงานค้าง",planRecords.filter(p=>p.status!=="เสร็จสิ้น").length,"รอ / กำลังดำเนินการ","red", "showKpiDetail('upcoming_plans')")}
     </div>
@@ -1102,7 +1020,7 @@ function renderDashboard(){
     </div>
     <div class="card chart-card">
       <h3>รายการ PM และประวัติย้อนหลังล่าสุด</h3>
-      ${recordsTable(pmRecords.slice(0,8), {compact:true})}
+      ${pmRecords.length ? recordsTable(pmRecords.slice(0,8), {compact:true}) : emptyState("ยังไม่มีข้อมูลในระบบ")}
     </div>
   `;
 }
@@ -1208,7 +1126,7 @@ function drawDashboardCharts(){
             titleFont: { family: "'Noto Sans Thai'", size: 12, weight: '700' },
             bodyFont: { family: "'JetBrains Mono'", size: 12 },
             padding: 12, cornerRadius: 10,
-            callbacks: { label: (ctx) => ` จำนวน: ${ctx.parsed.r} งาน (${Math.round(ctx.parsed.r / pmRecords.length * 100)}%)` }
+            callbacks: { label: (ctx) => ` จำนวน: ${ctx.parsed.r} งาน (${pmRecords.length ? Math.round(ctx.parsed.r / pmRecords.length * 100) : 0}%)` }
           }
         },
         scales: { r: { grid: { color: "rgba(226, 232, 240, 0.7)" }, ticks: { display: false } } }
@@ -1236,36 +1154,7 @@ function renderRoutes(){
       <div class="toolbar" style="align-items:center;">
         <span style="font-size:13px;font-weight:700;color:var(--navy);">เลือกทีม:</span>
         <select id="route-team-select">${teams.map(t => `<option value="${t}" ${ROUTE_TEAM_FILTER===t?"selected":""}>${t}</option>`).join("")}</select>
-        <span style="font-size:12px;color:var(--muted);margin-left:auto;">รวม <strong>${filtered.length} จุดตรวจ (เรียงตามระยะทางใกล้-ไกล)</strong></span>
-      </div>
-
-      <div class="mobile-record-list">
-        ${filtered.slice(0, 30).map((item, idx) => {
-          const queryLoc = encodeURIComponent((item.location || "การไฟฟ้านครหลวง เขตสมุทรปราการ") + " สมุทรปราการ");
-          const mapUrl = `https://www.google.com/maps/search/?api=1&query=${queryLoc}`;
-          return `
-            <div class="m-record-card">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg, #0088FF, #0055CC);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;">${idx+1}</span>
-                  <div>
-                    <div class="m-card-id">${esc(item.equipmentId)} <span class="capacity-pill">${esc(item.capacity||"-")}</span></div>
-                    <div style="font-size:12px;font-weight:600;margin-top:2px;">${esc(item.equipmentType)}</div>
-                  </div>
-                </div>
-                <div>${statusPill(item.status)}</div>
-              </div>
-              <div style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;">
-                <span>${esc(item.location||"สายป้อน กฟน. สป.")}</span>
-                <span class="dist-badge">~${item.distance} กม.</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--border);padding-top:10px;margin-top:2px;">
-                <span class="pill" style="background:var(--blue-soft);color:var(--navy);font-size:11px;">${esc(item.team)}</span>
-                <a href="${mapUrl}" target="_blank" class="btn-sm" style="text-decoration:none;gap:4px;">${ICONS.navigation} เปิด Google Maps</a>
-              </div>
-            </div>
-          `;
-        }).join("")}
+        <span style="font-size:12px;color:var(--muted);margin-left:auto;">รวม <strong>${filtered.length} จุดตรวจค้าง</strong></span>
       </div>
 
       ${filtered.length ? `
@@ -1291,7 +1180,7 @@ function renderRoutes(){
             }).join("")}
           </tbody>
         </table>
-      </div>` : emptyState("ไม่มีรายการจุดตรวจค้าง")}
+      </div>` : emptyState("ยังไม่มีรายการจุดตรวจค้างในแผนงาน")}
     </div>
   `;
 }
@@ -1535,25 +1424,6 @@ function renderPlan(){
     </form>
     <div class="card chart-card">
       <h3>ตารางแผนงาน (${sorted.length} รายการ)</h3>
-      <div class="mobile-record-list">
-        ${sorted.map(p=>`
-          <div class="m-record-card">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-              <div>
-                <div class="m-card-id">${esc(p.equipmentId)} <span class="capacity-pill">${esc(p.capacity||"-")}</span></div>
-                <div style="font-size:12px;color:var(--text);font-weight:600;margin-top:2px;">${esc(p.equipmentType)}</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:2px;">กำหนด: ${thDate(p.plannedDate)} • ${esc(p.team)}</div>
-              </div>
-              <div>${statusPill(p.status)}</div>
-            </div>
-            <div style="font-size:12px;color:var(--muted);">${esc(p.location||"-")} • ความสำคัญ: <strong style="color:${p.priority==="สูง"?C.red:p.priority==="กลาง"?C.amber:C.muted}">${esc(p.priority)}</strong></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--border);padding-top:10px;margin-top:2px;">
-              <button class="btn-sm" data-convert-plan="${p.id}">เปิดงาน PM</button>
-              <button class="btn-sm" style="border-color:var(--red);background:var(--red-soft);color:var(--red);" data-del-plan="${p.id}">${ICONS.trash}</button>
-            </div>
-          </div>
-        `).join("")}
-      </div>
       ${sorted.length ? `
       <div class="desktop-table-wrap">
         <table>
@@ -1686,15 +1556,15 @@ function attachGlobalListeners(){
 
   const clearBtn = document.getElementById("clear-btn");
   if(clearBtn) clearBtn.onclick = () => { 
-    if(confirm("ต้องการรีเซ็ตและสร้างชุดข้อมูลจำลองขนาดใหญ่ 300+ รายการหรือไม่?")) {
-      persist(generate300Records()); 
+    if(confirm("ต้องการล้างข้อมูลทั้งหมดในระบบใช่หรือไม่?")) {
+      persist(getEmptyState()); 
     }
   };
 
   const mResetBtn = document.getElementById("m-reset-btn");
   if(mResetBtn) mResetBtn.onclick = () => {
-    if(confirm("ต้องการรีเซ็ตและสร้างชุดข้อมูลจำลองขนาดใหญ่ 300+ รายการหรือไม่?")) {
-      persist(generate300Records()); 
+    if(confirm("ต้องการล้างข้อมูลทั้งหมดในระบบใช่หรือไม่?")) {
+      persist(getEmptyState()); 
     }
   };
 
@@ -1997,7 +1867,7 @@ function attachTabListeners(){
       const rows = [
         ["จำนวนงาน PM ทั้งหมด", STATE.pmRecords.length],
         ["ประวัติ Work Order ย้อนหลัง", STATE.pmRecords.filter(r=>r.isHistorical).length],
-        ["Health Index เฉลี่ย", "93.8%"],
+        ["Health Index เฉลี่ย", "0.0%"],
         ["ต้นทุนจริงรวม (บาท)", totalCost],
         ["แผนงานค้าง", STATE.planRecords.length]
       ];
